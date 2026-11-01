@@ -30,7 +30,8 @@ public class GameManager : MonoBehaviour
         new[] { V(-1,0,0), V(0,0,0), V(1,0,0), V(2,0,0) },   // I
         new[] { V(-1,0,0), V(0,0,0), V(1,0,0), V(-1,0,1) },  // J
         new[] { V(-1,0,0), V(0,0,0), V(1,0,0), V(1,0,1) },   // L
-        new[] { V(0,0,0), V(1,0,0), V(0,0,1), V(1,0,1) },    // O
+        new[] { V(0,0,0), V(1,0,0), V(0,0,1), V(1,0,1),
+            V(0,1,0), V(1,1,0), V(0,1,1), V(1,1,1) },        // O
         new[] { V(-1,0,0), V(0,0,0), V(0,0,1), V(1,0,1) },   // S
         new[] { V(-1,0,0), V(0,0,0), V(1,0,0), V(0,0,1) },   // T
         new[] { V(-1,0,1), V(0,0,1), V(0,0,0), V(1,0,0) },   // Z
@@ -52,6 +53,7 @@ public class GameManager : MonoBehaviour
     Material ghostMat, arrowMat;
     Camera mainCam;
     OrbitCamera orbit;
+    PlaneClearer clearer;
 
     // ---------------------------------------------------------------- старт
 
@@ -65,6 +67,9 @@ public class GameManager : MonoBehaviour
 
         mainCam = Camera.main;
         orbit = mainCam.GetComponent<OrbitCamera>();
+        
+        clearer = GetComponent<PlaneClearer>();
+        if (clearer == null) clearer = gameObject.AddComponent<PlaneClearer>();
 
         CalcBoardOrigin();
         grid = new Transform[boardWidth, maxHeight + 6, boardDepth];
@@ -77,7 +82,7 @@ public class GameManager : MonoBehaviour
         curRoot = new GameObject("CurrentPiece").transform;
         ghostRoot = new GameObject("Ghost").transform;
 
-        for (int i = 0; i < 4; i++) ghostCubes.Add(CreateCube(ghostRoot, 0, true));
+        
 
         BuildArrows();
 
@@ -121,12 +126,19 @@ public class GameManager : MonoBehaviour
 
         if (Input.GetKeyDown(KeyCode.Space)) { PlacePiece(); return; }
 
-        Vector3Int move = Vector3Int.zero;
-        if (Input.GetKeyDown(KeyCode.W)) move = CamForward();
-        else if (Input.GetKeyDown(KeyCode.S)) move = -CamForward();
-        else if (Input.GetKeyDown(KeyCode.D)) move = CamRight();
-        else if (Input.GetKeyDown(KeyCode.A)) move = -CamRight();
-        if (move != Vector3Int.zero) TryMove(move);
+        bool shift = Input.GetKey(KeyCode.LeftShift) || Input.GetKey(KeyCode.RightShift);
+
+        Vector3Int dir = Vector3Int.zero;
+        if (Input.GetKeyDown(KeyCode.W)) dir = CamForward();
+        else if (Input.GetKeyDown(KeyCode.S)) dir = -CamForward();
+        else if (Input.GetKeyDown(KeyCode.D)) dir = CamRight();
+        else if (Input.GetKeyDown(KeyCode.A)) dir = -CamRight();
+
+        if (dir != Vector3Int.zero)
+        {
+            if (shift) Rotate(dir);
+            else TryMove(dir);
+        }
 
         if (Input.GetMouseButtonDown(0)) HandleClick();
     }
@@ -177,6 +189,7 @@ public class GameManager : MonoBehaviour
     // Фигура "заваливается" в сторону стрелки
     void Rotate(Vector3Int dir)
     {
+        if (curIndex == 3) return;   // O — куб, поворот ничего не меняет
         Vector3 axis = Vector3.Cross(Vector3.up, (Vector3)dir);
         Quaternion q = Quaternion.AngleAxis(90f, axis);
 
@@ -248,7 +261,9 @@ public class GameManager : MonoBehaviour
             grid[cell.x, cell.y, cell.z] = cube;
         }
 
-        // TODO следующий этап: проверка и удаление заполненных плоскостей, очки
+        int cleared = clearer.ClearPlanes(grid, boardWidth, boardDepth,
+            (x, y, z) => CellToWorld(new Vector3(x, y, z)));
+        if (cleared > 0) Debug.Log("Убрано плоскостей: " + cleared + ", очки: " + clearer.Score);
         SpawnNext();
     }
 
@@ -265,14 +280,18 @@ public class GameManager : MonoBehaviour
     void SpawnNext()
     {
         curIndex = nextIndex;
-        nextIndex = Random.Range(0, Shapes.Length);   // пригодится для показа "следующей фигуры"
+        nextIndex = Random.Range(0, Shapes.Length);   
 
         curCells = new List<Vector3Int>(Shapes[curIndex]);
         curPos = new Vector3Int(boardWidth / 2 - 1, StackTop() + 4, boardDepth / 2 - 1);
-
+        
         curCubes.Clear();
         foreach (Transform child in curRoot) Destroy(child.gameObject);
         for (int i = 0; i < curCells.Count; i++) curCubes.Add(CreateCube(curRoot, curIndex, false));
+        
+        ghostCubes.Clear();
+        foreach (Transform child in ghostRoot) Destroy(child.gameObject);
+        for (int i = 0; i < curCells.Count; i++) ghostCubes.Add(CreateCube(ghostRoot, 0, true));
 
         Refresh();
         FocusCamera();
